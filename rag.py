@@ -1,6 +1,8 @@
 """
 RAG (Retrieval-Augmented Generation) System
 Part 1: Load documents from folder
+Part 2: Split documents into chunks
+Part 3: Create embeddings and store in vector database
 """
 
 import os
@@ -8,6 +10,7 @@ from typing import List
 from langchain_core.documents import Document
 from langchain_community.document_loaders import DirectoryLoader,TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
 
 #PART 1
 def load_documents(directory_path: str = "./documents") -> List[Document]:
@@ -84,6 +87,7 @@ def test_load_documents():
         print(f"Error Type: {type(e)}")
         return None
 
+#PART 2
 def split_documents(documents: List[Document], chunk_size: int = 1000, chunk_overlap: int = 200) -> List[Document]:
     """
     Split documents into smaller chunks for better processing.
@@ -126,6 +130,7 @@ def split_documents(documents: List[Document], chunk_size: int = 1000, chunk_ove
     
     return chunks
 
+#PART 2
 def test_split_documents(documents: List[Document]):
     """
     Test the document splitting functionality.
@@ -166,6 +171,90 @@ def test_split_documents(documents: List[Document]):
         print(f"Error: {str(e)}")
         return None
     
+def create_embeddings(model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+    """
+    Create an embedding model to convert text to vectors.
+
+    Args:
+        model_name (str): Name of the HuggingFace model to use for embeddings.
+
+    Returns:
+        HuggingFaceEmbeddings object that can embed text into vectors.
+    """
+    print(f"Creating embeddings using model...")
+    print(f"Model: {model_name}")
+
+    #Create the embeddings object
+    #This model converts text to 384-dimensional vectors
+    embeddings = HuggingFaceEmbeddings(
+        model_name=model_name,
+        model_kwargs={"device": "cpu"},  # Use "cpu" (Not GPU)
+        encode_kwargs={"normalize_embeddings": True}  # Normalize embeddings for better similarity search
+    )
+
+    print("Embeddings model created.")
+    return embeddings       
+
+def test_create_embeddings():
+    """
+    Test the embedding model.
+    Shows how text gets converted to vectors.
+    
+    """
+    print("\n" + "="*50)
+    print("TESTING EMBEDDING CREATION")
+    print("="*50 + "\n")    
+
+    try:
+
+        #Create embeddings model
+        embeddings = create_embeddings()
+
+        #Test embedding with sample text
+        sample_text = [
+            "Inception is a movie about dreams",
+            "Interstellar explores time and space",
+            "I love pizza and pasta"
+        ]
+
+        print("\nEmbedding sample texts:")
+        print("-"*50)
+
+        vectors = []
+        for i, text in enumerate(sample_text, 1):
+            #Convert text to vector
+            vector = embeddings.embed_query(text)
+            vectors.append(vector)
+            print(f"\n{i}. Text: '{text}'")
+            print(f"Vector length: {len(vector)} dimensions")
+            print(f"First 5 values: {vector[:5]}")
+            print(f"Vector preview: [{vector[0]:.3f}, {vector[1]:.3f}, {vector[2]:.3f}, ...]")
+
+        #Show similarity example
+        vec1, vec2, vec3 = vectors[0], vectors[1], vectors[2]
+        
+        #Calculate cosine similarity
+        import numpy as np
+        def cosine_similarity(v1, v2):
+            return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        
+        sim_1_2 = cosine_similarity(vec1, vec2)
+        sim_1_3 = cosine_similarity(vec1, vec3)
+
+        print("\nCosine Similarity Between:")
+        print(f"'Inception...' and 'Interstellar...': {sim_1_2:.3f} (High both movies)")
+        print(f"'Inception...' and 'Pizza...': {sim_1_3:.3f} (Low different topics)")        
+        print("Similar text have higher similarity scores.")
+
+        print("\n Embedding test PASSED!")
+        return embeddings
+
+    except Exception as e:
+        print(f"\n Embedding creation test FAILED!")
+        print(f"Error: {str(e)}")
+        return None
+
+
 def test_all():
     """
     Run all tests for the RAG system components.
@@ -187,13 +276,21 @@ def test_all():
         print("Document splitting test failed.")
         return
 
+    #Test 3 embedding creation
+    embeddings = test_create_embeddings()
+    if not embeddings:
+        print("Embedding creation test failed.")
+        return
+
+
     print("\n" + "="*50)
     print("\nAll tests completed successfully!")
     print("="*50)
     print(f"\nSummary:")
     print(f"  • Loaded {len(docs)} documents")
     print(f"  • Created {len(chunks)} chunks")
-    print(f"  • Ready for embedding and retrieval!")
+    print(f"  • Embeddings model ready")
+    print(f"  • Ready for vector storage")
     
 if __name__ == "__main__":
     #Run the test function
