@@ -1,2 +1,2 @@
 # movie-recs
-A  movie recommendation chatbot using open source LLMs, RAG, and LangChain
+A  movie & book recommendation chatbot using open source LLMs, RAG, and LangChain
