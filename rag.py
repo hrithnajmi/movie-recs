@@ -7,6 +7,7 @@ import os
 from typing import List
 from langchain_core.documents import Document
 from langchain_community.document_loaders import DirectoryLoader,TextLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 #PART 1
 def load_documents(directory_path: str = "./documents") -> List[Document]:
@@ -69,20 +70,131 @@ def test_load_documents():
 
         #Show first documents as example
         if docs:
-            print("\n First Document Preview:")
+            print("\nFirst Document Preview:")
             print("-"*50)
             print(f"Source: {docs[0].metadata.get('source')}")
             print(f"Content (first 300 characters)")
             print(docs[0].page_content[:300] + "...")
             print("-"*50)
 
-        print("\n Document loading test PASSED!")
+        print("\nDocument loading test PASSED!")
         return docs
     except Exception as e:
         print(f"\n Document loading test FAILED: {e}")
         print(f"Error Type: {type(e)}")
         return None
+
+def split_documents(documents: List[Document], chunk_size: int = 1000, chunk_overlap: int = 200) -> List[Document]:
+    """
+    Split documents into smaller chunks for better processing.
+
+    Args:
+        documents (List[Document]): List of LangChain Document objects.
+        chunk_size (int): Maximum size of each chunk.
+        chunk_overlap (int): Overlap size between chunks.
+
+    Returns:
+        List of split LangChain Document objects.
+    """
+    print(f"Splitting {len(documents)} documents into chunks...")
+    print(f"Chunk size: {chunk_size}, Chunk overlap: {chunk_overlap}")
+
+
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        separators=[
+            "\n\n",  # Split by double newline (paragraphs) first
+            "\n",    # Then single newline
+            ". ",    # Then sentences
+            " ",     # Then words
+            ""       # Characters as last resort
+        ]
+    )
+
+    chunks = text_splitter.split_documents(documents)
+
+    original_total = sum(len(doc.page_content) for doc in documents)
+    chunks_total = sum(len(chunk.page_content) for chunk in chunks)
+    avg_chunk_size = chunks_total / len(chunks) if chunks else 0
+    
+    print(f"\nOriginal total: {original_total:,} characters")
+    print(f"After chunking: {chunks_total:,} characters")
+    print(f"Average chunk size: {avg_chunk_size:.0f} characters")
+    
+    return chunks
+
+def test_split_documents(documents: List[Document]):
+    """
+    Test the document splitting functionality.
+    Run this to see how documents are split into chunks.
+
+    Args:
+        documents (List[Document]): List of LangChain Document objects.
+
+    """
+
+    print("\n" + "="*50)
+    print("TESTING DOCUMENT SPLITTING")
+    print("="*50 + "\n")
+
+    try:        
+        #Split documents into chunks
+        chunks = split_documents(documents, chunk_size=1000, chunk_overlap=200)
+
+        #Show examples of chunks
+        if chunks:
+            print("\nExample Chunks:")
+            print("-"*50)
+
+            #Show first 3 chunks
+            for i, chunk in enumerate(chunks[:3], 1):
+                source = os.path.basename(chunk.metadata.get('source', 'unknown'))
+                print(f"\nChunk {i} (from {source}):")
+                print(f"Length: {len(chunk.page_content)} characters")
+                print(f"Content preview:")
+                print(chunk.page_content[:200] + "...")
+                print("-" * 50)
+        
+        print("\n Document splitting test PASSED!")
+        return chunks
+        
+    except Exception as e:
+        print(f"\n Document splitting test FAILED!")
+        print(f"Error: {str(e)}")
+        return None
+    
+def test_all():
+    """
+    Run all tests for the RAG system components.
+    """
+
+    print("\n" + "="*50)
+    print("RUNNING ALL RAG SYSTEM")
+    print("="*50)
+
+    #Test 1 document loading
+    docs = test_load_documents()
+    if not docs:
+        print("Document loading test failed. Aborting further tests.")
+        return
+
+    #Test 2 document splitting
+    chunks = test_split_documents(docs)
+    if not chunks:
+        print("Document splitting test failed.")
+        return
+
+    print("\n" + "="*50)
+    print("\nAll tests completed successfully!")
+    print("="*50)
+    print(f"\nSummary:")
+    print(f"  • Loaded {len(docs)} documents")
+    print(f"  • Created {len(chunks)} chunks")
+    print(f"  • Ready for embedding and retrieval!")
     
 if __name__ == "__main__":
     #Run the test function
-    test_load_documents()
+    test_all()
