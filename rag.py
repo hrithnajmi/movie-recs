@@ -3,6 +3,7 @@ RAG (Retrieval-Augmented Generation) System
 Part 1: Load documents from folder
 Part 2: Split documents into chunks
 Part 3: Create embeddings and store in vector database
+Part 4: Store in ChromaDB vector database
 """
 
 import os
@@ -11,6 +12,7 @@ from langchain_core.documents import Document
 from langchain_community.document_loaders import DirectoryLoader,TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
 
 #PART 1
 def load_documents(directory_path: str = "./documents") -> List[Document]:
@@ -171,6 +173,7 @@ def test_split_documents(documents: List[Document]):
         print(f"Error: {str(e)}")
         return None
     
+#PART 3
 def create_embeddings(model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
     """
     Create an embedding model to convert text to vectors.
@@ -195,6 +198,7 @@ def create_embeddings(model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     print("Embeddings model created.")
     return embeddings       
 
+#PART 3
 def test_create_embeddings():
     """
     Test the embedding model.
@@ -254,6 +258,158 @@ def test_create_embeddings():
         print(f"Error: {str(e)}")
         return None
 
+def create_vectorstore(chunks: List[Document], embeddings, persist_directory: str = "./chroma_db"):
+    """
+    Create a ChromaDB vector store from document chunks.
+    
+    Args:
+        chunks: List of document chunks to store
+        embeddings: Embedding model to convert text to vectors.
+        persist_directory: Where to save the ChromaDB database.
+
+    Returns:
+        Chroma vectorestore object for  similarity search
+
+    What this does:
+        1. Converst each chunk to a 384D vectore using the embeddings model
+        2. Stores vectore + text + metadata in ChromaDB
+        3. Creates index for fast similarity search
+        4. Saves everything to disk(chroma_db/ folder)
+
+    Example:
+        embeddings = create_embeddings()
+        vectorstore = create_vectorstore(chunks, embeddings)
+        results = vectorstore.similarity_search("movies about dreams")
+    """
+    print(f"\n Creating vector database...")
+    print(f" Database location: {persist_directory}")
+    print(f" Number of chunks to embed: {len(chunks)}")
+
+
+    #Check if database already exists
+    if os.path.exists(persist_directory):
+        print(f" Database already exist. Deleting old database...")
+        import shutil
+        shutil.rmtree(persist_directory)
+
+    #Create the vector store
+    #This will:
+    #1. Convert each chunk's text to a  348D vector using the embeddings model
+    #2. Store the vectors in ChromaDB
+    #3. Save to disk in chroma_db/ folder
+
+    vectorstore = Chroma.from_documents(
+        documents=chunks,
+        embedding=embeddings,
+        persist_directory=persist_directory
+    )
+
+    print(" Vector database created and saved to disk.")
+    print(f" Stored {len(chunks)} chunks")
+    print(f" Database saved to : {persist_directory}")
+
+    #Show what's stored in the database
+    collection = vectorstore._collection
+    print(f" Total vectors in database: {collection.count()}")
+
+    return vectorstore
+
+def load_vectorstore(embeddings, persist_directory: str = "./chroma_db"):
+    """
+    Load an existing ChromaDB vector store from disk.
+
+    Args:
+        embeddings: Embedding model (must be same as when created)
+        persist_directory: Where the ChromaDB database is saved.
+
+    Returns:
+        Chroma vectorestore object for similarity search.
+
+    Use this when:
+    - You've already created the data base
+    - You want to load it without re-embedding everything
+    - Starting the chatbot (load existing knowledge base)
+
+
+    Example:
+        embeddings = create_embeddings()
+        vectorstore = load_vectorstore(embeddings)
+        results = vectorstore.similarity_search("sci-fi movies")
+    """
+
+    print(f"\n Loading vector database from: {persist_directory}")
+
+    if not os.path.exists(persist_directory):
+        raise FileNotFoundError(f"Database not found at: {persist_directory}."
+                                f"Create it first using create_vectorstore().")
+
+    #Load the existing database
+    vectorstore = Chroma(
+        persist_directory=persist_directory,
+        embedding_function=embeddings
+    )
+
+    collection = vectorstore._collection
+    print(f"Database loaded!")
+    print(f"Total vectors in database: {collection.count()}")
+
+    return vectorstore
+
+def test_vectorstore():
+    """
+    Test creating and using the vector database.
+    This create the chroma_db/ folder!
+    """
+
+    print("\n" + "="*50)
+    print("TESTING VECTOR DATABASE")
+    print("="*50 + "\n")
+
+    try:
+        #First we need chunks and embeddings
+        print("Preparing data...")
+        docs = load_documents("./documents")
+        chunks = split_documents(docs, chunk_size=1000, chunk_overlap=200)
+        embeddings = create_embeddings()
+
+        #Create the vector database
+        vectorstore = create_vectorstore(chunks, embeddings)
+
+        #Test similarity search
+        print("\n" + "="*50)
+        print("TESTING SIMILARITY SEARCH: ")
+        print("="*50 + "\n")
+
+        test_queries = [
+            "movies about dreams and reality",
+            "books with magic and adventure",
+            "what movies did I rate 10/10"
+        ]
+
+        for query in test_queries:
+            print(f"\nQuery: '{query}'")
+            print("-"*50)
+
+            #Search for similar chunks
+            results = vectorstore.similarity_search(query, k=3)
+
+            for i, doc in enumerate(results, 1):
+                source = os.path.basename(doc.metadata.get('source', 'unknown'))
+                print(f"\nResult {i} (from {source}):")
+                print(f"{doc.page_content[:200]}...")
+
+        print("\n" + "="*50)
+        print("Vector database test PASSED!")
+        print("="*50 + "\n")
+
+        return vectorstore
+    
+    except Exception as e:
+        print(f"\n Vector database test FAILED!")
+        print(f"Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def test_all():
     """
@@ -281,16 +437,26 @@ def test_all():
     if not embeddings:
         print("Embedding creation test failed.")
         return
+    
+    #Test 4: Create vector database
+    vectorstore = test_vectorstore()
+    if not vectorstore:
+        return
 
 
-    print("\n" + "="*50)
+    print("\n" + "="*60)
     print("\nAll tests completed successfully!")
-    print("="*50)
+    print("="*60)
+    print(f"\n RAG System Complete!")
     print(f"\nSummary:")
     print(f"  • Loaded {len(docs)} documents")
     print(f"  • Created {len(chunks)} chunks")
     print(f"  • Embeddings model ready")
-    print(f"  • Ready for vector storage")
+    print(f"  • Vector database created")
+    print(f"  • Ready to use for chatbot!")
+    print(f"The chroma_db/ folder now exists!")
+    print(f"You can delete it to rebuild from scratch.")
+
     
 if __name__ == "__main__":
     #Run the test function
