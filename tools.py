@@ -5,6 +5,7 @@ Part 2: Langchain tool wrapper
 Part 3: Web Search Tool (Brave API)
 Part 4: Movie Tool (OMDB API)
 Part 5: Book Tool (OpenLibrary API)
+Part 6: RAG Tool (Search Personal Movie/Book Docs))
 """
 
 from langchain_core.tools import Tool
@@ -14,6 +15,235 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Import RAG functions from rag.py
+try:
+    from rag import create_embeddings, load_vectorstore
+    RAG_AVAILABLE = True
+except ImportError:
+    RAG_AVAILABLE = False
+    print("⚠️  Warning: Could not import RAG functions. RAG tool will be disabled.")
+
+# ============================================================
+# 5.0 Start OF RAG TOOL (SEARCH PERSONAL DOCUMENTS)
+# ============================================================
+
+# Global variable to cache the vectorstore
+_vectorstore = None
+
+def rag_search(query: str, max_results: int = 3) -> str:
+    """
+    Search personal documents using RAG (Retrieval-Augmented Generation).
+    
+    This tool allows the LLM to search through your personal movie/book
+    collection, ratings, and notes stored in local documents.
+    
+    Args:
+        query: The search query string
+        max_results: Maximum number of results to return (default: 3)
+        
+    Returns:
+        Formatted search results from documents, or error message
+        
+    Examples:
+        >>> search_documents("movies rated 10/10")
+        'Found in my_ratings.txt:
+         INCEPTION (2010) - 10/10
+         Absolutely mind-blowing!...'
+        
+    Requirements:
+        - Needs chroma_db/ folder to exist (run rag.py first)
+        - Loads from documents/ folder
+    """
+
+    global _vectorstore
+
+     # Check if RAG is available
+    if not RAG_AVAILABLE:
+        return (
+            "Error: RAG system not available. "
+            "Make sure rag.py exists and run 'python rag.py' first."
+        )
+    
+    try:
+        # Load vectorstore (cached after first load)
+        if _vectorstore is None:
+            # Check if database exists
+            if not os.path.exists("./chroma_db"):
+                return (
+                    "Error: Vector database not found. "
+                    "Please run 'python rag.py' first to create it."
+                )
+            
+        
+            # Load embeddings model
+            embeddings = create_embeddings()
+            
+            # Load existing vectorstore
+            _vectorstore = load_vectorstore(embeddings, persist_directory="./chroma_db")
+        
+        # Search for similar documents
+        results = _vectorstore.similarity_search(query, k=max_results)
+        
+        if not results:
+            return f"No relevant information found in documents for query: '{query}'"
+        
+        # Format results for the LLM
+        formatted_results = []
+        formatted_results.append(f"📚 Search results from personal documents for: '{query}'\n")
+        
+        for i, doc in enumerate(results, 1):
+            # Get source filename
+            source = doc.metadata.get("source", "unknown")
+            filename = os.path.basename(source)
+            
+            # Get content
+            content = doc.page_content
+            
+            formatted_results.append(f"Result {i} (from {filename}):")
+            formatted_results.append(f"{content}")
+            formatted_results.append("")  # Empty line between results
+        
+        return "\n".join(formatted_results)
+        
+    except FileNotFoundError as e:
+        return f"Error: Vector database not found. Run 'python rag.py' first to create it."
+    
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {str(e)}"
+    
+def test_rag_search():
+    """
+    Test the RAG search tool.
+    """
+    print("\n" + "="*50)
+    print("TESTING RAG SEARCH TOOL")
+    print("="*50 + "\n")
+    
+    # Check if RAG is available
+    if not RAG_AVAILABLE:
+        print("⚠️  RAG system not available")
+        print("   Skipping RAG search tests")
+        print("   Make sure rag.py exists")
+        print("\n" + "="*50)
+        return
+    
+    # Check if database exists
+    if not os.path.exists("./chroma_db"):
+        print("⚠️  Vector database not found at ./chroma_db")
+        print("   Please run 'python rag.py' first to create it")
+        print("\n" + "="*50)
+        return
+    
+    print("✅ Vector database found!")
+    print()
+    
+    # Test cases
+    test_queries = [
+        ("movies rated 10/10", "Personal ratings query"),
+        ("books with magic", "Subject-based query"),
+        ("Inception movie", "Specific movie query")
+    ]
+    
+    for query, description in test_queries:
+        print(f"📝 Test: {description}")
+        print(f"   Query: '{query}'")
+        print()
+        
+        result = rag_search(query, max_results=2)
+        
+        # Check if it's an error
+        if result.startswith("Error:"):
+            print(f"   ❌ {result}")
+        else:
+            print(f"   ✅ Results found!")
+            # Print first 400 chars
+            print(f"   {result[:400]}...")
+        
+        print()
+    
+    print("="*50)
+    print("✅ RAG search tool test COMPLETED!")
+    print("="*50)
+    
+# ============================================================
+# 5.0 END OF RAG SEARCH TOOL (SEARCH PERSONAL DOCUMENTS)
+# ============================================================
+
+# ============================================================
+# 5.1 START OF RAG SEARCH LANGCHAIN TOOL WRAPPER
+# ============================================================
+
+# Create the LangChain Tool wrapper for RAG search
+rag_search_tool = Tool(
+    name="rag_search",
+    func=rag_search,
+    description=(
+        "Use this tool to search through personal movie and book collection, "
+        "ratings, reviews, and notes stored in local documents. "
+        "This is your FIRST choice for questions about: "
+        "personal ratings, favorite movies/books, what you've watched/read, "
+        "your opinions, and any information that might be in your personal notes. "
+        "Input should be a clear search query as a string. "
+        "Examples: 'movies I rated 10/10', 'books about magic', 'what did I think of Inception'. "
+        "Returns relevant excerpts from your personal documents."
+    )
+)
+
+def get_rag_search_tool():
+    """
+    Returns the RAG search tool for use by the LLM agent.
+    
+    Returns:
+        LangChain Tool object for searching personal documents
+        
+    Example:
+        >>> from tools import get_rag_search_tool
+        >>> tool = get_rag_search_tool()
+        >>> result = tool.func("movies rated 10/10")
+        >>> print(result)
+    """
+    return rag_search_tool
+
+def test_rag_search_tool():
+    """
+    Test the LangChain wrapper for RAG search.
+    """
+    print("\n" + "="*50)
+    print("TESTING RAG SEARCH LANGCHAIN WRAPPER")
+    print("="*50 + "\n")
+    
+    # Check if RAG is available and database exists
+    if not RAG_AVAILABLE or not os.path.exists("./chroma_db"):
+        print("⚠️  Skipping - RAG not available or database not found")
+        print("="*50)
+        return
+    
+    # Get the tool
+    tool = get_rag_search_tool()
+    
+    # Show tool properties
+    print("📋 Tool Properties:")
+    print(f"   Name: {tool.name}")
+    print(f"   Description: {tool.description[:80]}...")
+    print()
+    
+    # Test using the tool
+    print("🧪 Testing tool.run() method:")
+    result = tool.run("what movies did I rate highly")
+    
+    if result.startswith("Error:"):
+        print(f"   ❌ {result}")
+    else:
+        print(f"   ✅ Search successful!")
+        print(f"   Results preview: {result[:250]}...")
+    
+    print()
+    print("="*50)
+    print("✅ RAG search wrapper test COMPLETED!")
+    print("="*50)
+
+
 
 # ============================================================
 # 1.0 START OF CALCULATOR TOOL
@@ -923,6 +1153,9 @@ def test_all_tools():
 
     # Test 4: LangChain book info tool wrapper
     test_get_book_info_tool()
+
+    # Test 5: LangChain RAG search tool wrapper
+    test_rag_search_tool()  
 
 
     print("\n" + "="*60)
